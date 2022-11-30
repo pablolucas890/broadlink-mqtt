@@ -12,6 +12,7 @@ import sched
 import json
 import binascii
 import types
+import threading
 from threading import Thread
 from test import TestDevice
 
@@ -75,9 +76,20 @@ retain = cf.get('mqtt_retain', False)
 
 topic_prefix = cf.get('mqtt_topic_prefix', 'broadlink/')
 
+def myPeriodicFunction():
+    global global_device
+    global_device = get_device(cf)
+    print("\n\n\n================== Funcao de Incrementacao ================")
+    print(global_device)
 
+
+def startTimer():
+    threading.Timer(1, startTimer).start()
+    myPeriodicFunction()
 # noinspection PyUnusedLocal
 def on_message(client, device, msg):
+    print("\n\n\n================== Funcao de on_message ==================")
+    print(device)
     command = msg.topic[len(topic_prefix):]
     is_broadcast = False
     broadcast_mac = "ff_ff_ff_ff_ff_ff/"
@@ -605,11 +617,12 @@ class SchedulerThread(Thread):
 
 
 if __name__ == '__main__':
+    startTimer()
     devices = get_device(cf)
 
     clientid = cf.get('mqtt_clientid', 'broadlink-%s' % os.getpid())
     # initialise MQTT broker connection
-    mqttc = paho.Client(clientid, clean_session=cf.get('mqtt_clean_session', False), userdata=devices)
+    mqttc = paho.Client(clientid, clean_session=cf.get('mqtt_clean_session', False), userdata=global_device)
 
     mqttc.on_message = on_message
     mqttc.on_connect = on_connect
