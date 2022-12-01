@@ -507,6 +507,7 @@ def configure_device(device, mqtt_prefix):
 
 
 def broadlink_rm_temperature_timer(scheduler, delay, device, mqtt_prefix):
+    device = global_device
     scheduler.enter(delay, 1, broadlink_rm_temperature_timer, [scheduler, delay, device, mqtt_prefix])
 
     try:
