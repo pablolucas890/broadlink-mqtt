@@ -378,16 +378,14 @@ def get_device(cf):
         devices = broadlink.discover(timeout=lookup_timeout) if local_address is None else \
             broadlink.discover(timeout=lookup_timeout, local_ip_address=local_address)
 
-        # Devices's timeout its time to try send and receive confirmation messages to broadlink
-        for d in devices:
-            d.timeout = cf.get('lookup_timeout', 20)
-
         if len(devices) == 0:
             logging.error('No Broadlink devices found')
             sys.exit(2)
         mqtt_multiple_prefix_format = cf.get('mqtt_multiple_subprefix_format', None)
         devices_dict = {}
         for device in devices:
+            # Devices's timeout its time to try send and receive confirmation messages to broadlink
+            device.timeout = 1
             mqtt_subprefix = mqtt_multiple_prefix_format.format(
                 type=device.type,
                 host=device.host[0],
