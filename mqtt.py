@@ -12,6 +12,7 @@ import sched
 import json
 import binascii
 import types
+import threading
 from threading import Thread
 from test import TestDevice
 
@@ -75,9 +76,15 @@ retain = cf.get('mqtt_retain', False)
 
 topic_prefix = cf.get('mqtt_topic_prefix', 'broadlink/')
 
+def startTimer():
+    global global_device
+    # Time to Restart Funcions
+    threading.Timer(cf.get('lookup_timeout', 20), startTimer).start()
+    global_device = get_device(cf)
 
 # noinspection PyUnusedLocal
 def on_message(client, device, msg):
+    device = global_device
     command = msg.topic[len(topic_prefix):]
     is_broadcast = False
     broadcast_mac = "ff_ff_ff_ff_ff_ff/"
@@ -116,6 +123,7 @@ def on_message(client, device, msg):
 
     except Exception:
         logging.exception("Error")
+
 
 def exec_command_message(command, device, msg):
     action = msg.payload.decode('utf-8').lower()
@@ -369,6 +377,11 @@ def get_device(cf):
         lookup_timeout = cf.get('lookup_timeout', 20)
         devices = broadlink.discover(timeout=lookup_timeout) if local_address is None else \
             broadlink.discover(timeout=lookup_timeout, local_ip_address=local_address)
+
+        # Devices's timeout its time to try send and receive confirmation messages to broadlink
+        for d in devices:
+            d.timeout = cf.get('lookup_timeout', 20)
+
         if len(devices) == 0:
             logging.error('No Broadlink devices found')
             sys.exit(2)
@@ -605,11 +618,11 @@ class SchedulerThread(Thread):
 
 
 if __name__ == '__main__':
-    devices = get_device(cf)
+    startTimer()
 
     clientid = cf.get('mqtt_clientid', 'broadlink-%s' % os.getpid())
     # initialise MQTT broker connection
-    mqttc = paho.Client(clientid, clean_session=cf.get('mqtt_clean_session', False), userdata=devices)
+    mqttc = paho.Client(clientid, clean_session=cf.get('mqtt_clean_session', False))
 
     mqttc.on_message = on_message
     mqttc.on_connect = on_connect
