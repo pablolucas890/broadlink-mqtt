@@ -393,7 +393,8 @@ def get_device(cf):
                 host=device.host[0],
                 mac='_'.join(format(s, '02x') for s in device.mac),
                 mac_nic='_'.join(format(s, '02x') for s in device.mac[3::]))
-            device = configure_device(device, topic_prefix + mqtt_subprefix)
+            device.auth()
+            # device = configure_device(device, topic_prefix + mqtt_subprefix)
             devices_dict[mqtt_subprefix] = device
         return devices_dict
     elif device_type == 'test':
@@ -507,7 +508,7 @@ def configure_device(device, mqtt_prefix):
 
 
 def broadlink_rm_temperature_timer(scheduler, delay, device, mqtt_prefix):
-    device = global_device
+
     scheduler.enter(delay, 1, broadlink_rm_temperature_timer, [scheduler, delay, device, mqtt_prefix])
 
     try:
