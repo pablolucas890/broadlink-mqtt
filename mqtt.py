@@ -391,7 +391,11 @@ def get_device(cf):
                 host=device.host[0],
                 mac='_'.join(format(s, '02x') for s in device.mac),
                 mac_nic='_'.join(format(s, '02x') for s in device.mac[3::]))
-            device.auth()
+            print("Connected with decice: ", device)
+            try:
+                device.auth()
+            except:
+                print("Error at autenticate device")
             # device = configure_device(device, topic_prefix + mqtt_subprefix)
             devices_dict[mqtt_subprefix] = device
         return devices_dict
