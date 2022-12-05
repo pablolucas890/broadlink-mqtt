@@ -12,6 +12,7 @@ import sched
 import json
 import binascii
 import types
+import threading
 from threading import Thread
 from test import TestDevice
 
@@ -75,9 +76,15 @@ retain = cf.get('mqtt_retain', False)
 
 topic_prefix = cf.get('mqtt_topic_prefix', 'broadlink/')
 
+def startTimer():
+    global global_device
+    # Time to Restart Funcions
+    threading.Timer(cf.get('lookup_timeout', 20), startTimer).start()
+    global_device = get_device(cf)
 
 # noinspection PyUnusedLocal
 def on_message(client, device, msg):
+    device = global_device
     command = msg.topic[len(topic_prefix):]
     is_broadcast = False
     broadcast_mac = "ff_ff_ff_ff_ff_ff/"
@@ -116,6 +123,7 @@ def on_message(client, device, msg):
 
     except Exception:
         logging.exception("Error")
+
 
 def exec_command_message(command, device, msg):
     action = msg.payload.decode('utf-8').lower()
@@ -369,17 +377,21 @@ def get_device(cf):
         lookup_timeout = cf.get('lookup_timeout', 20)
         devices = broadlink.discover(timeout=lookup_timeout) if local_address is None else \
             broadlink.discover(timeout=lookup_timeout, local_ip_address=local_address)
+
         if len(devices) == 0:
             logging.error('No Broadlink devices found')
             sys.exit(2)
         mqtt_multiple_prefix_format = cf.get('mqtt_multiple_subprefix_format', None)
         devices_dict = {}
         for device in devices:
+            # Devices's timeout its time to try send and receive confirmation messages to broadlink
+            device.timeout = 1
             mqtt_subprefix = mqtt_multiple_prefix_format.format(
                 type=device.type,
                 host=device.host[0],
                 mac='_'.join(format(s, '02x') for s in device.mac),
                 mac_nic='_'.join(format(s, '02x') for s in device.mac[3::]))
+            print("Connected with decice: ", device)
             device = configure_device(device, topic_prefix + mqtt_subprefix)
             devices_dict[mqtt_subprefix] = device
         return devices_dict
@@ -413,15 +425,29 @@ def get_device(cf):
 
 
 def configure_device(device, mqtt_prefix):
-    device.auth()
-    logging.debug('Connected to \'%s\' Broadlink device at \'%s\' (MAC %s) and started listening to MQTT commands at \'%s#\' '
+    try:
+        device.auth()
+        logging.debug('Connected to \'%s\' Broadlink device at \'%s\' (MAC %s) and started listening to MQTT commands at \'%s#\' '
                   % (device.type, device.host[0], ':'.join(format(s, '02x') for s in device.mac), mqtt_prefix))
+    except:
+        print("Error on autenticate device, Plese confirm if device is connect")
+    return device
 
+
+def start_scheduler():
+    mqtt_multiple_prefix_format = cf.get('mqtt_multiple_subprefix_format', None)
+    device = list(global_device.values())[0]
+    mqtt_subprefix = mqtt_multiple_prefix_format.format(
+                type=device.type,
+                host=device.host[0],
+                mac='_'.join(format(s, '02x') for s in device.mac),
+                mac_nic='_'.join(format(s, '02x') for s in device.mac[3::]))
+    mqtt_prefix = topic_prefix + mqtt_subprefix
     broadlink_rm_temperature_interval = cf.get('broadlink_rm_temperature_interval', 0)
     if (device.type == 'RM2' or device.type == 'RM4' or device.type == 'RM4PRO' or device.type == 'RM4MINI') and broadlink_rm_temperature_interval > 0:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(broadlink_rm_temperature_interval, 1, broadlink_rm_temperature_timer,
-                        [scheduler, broadlink_rm_temperature_interval, device, mqtt_prefix])
+                        [scheduler, broadlink_rm_temperature_interval,mqtt_prefix])
         # scheduler.run()
         tt = SchedulerThread(scheduler)
         tt.daemon = True
@@ -431,7 +457,7 @@ def configure_device(device, mqtt_prefix):
     if (device.type == 'SP2' or device.type == 'SP3S') and broadlink_sp_energy_interval > 0:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(broadlink_sp_energy_interval, 1, broadlink_sp_energy_timer,
-                        [scheduler, broadlink_sp_energy_interval, device, mqtt_prefix])
+                        [scheduler, broadlink_sp_energy_interval, mqtt_prefix])
         # scheduler.run()
         tt = SchedulerThread(scheduler)
         tt.daemon = True
@@ -441,7 +467,7 @@ def configure_device(device, mqtt_prefix):
     if device.type == 'A1' and broadlink_a1_sensors_interval > 0:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(broadlink_a1_sensors_interval, 1, broadlink_a1_sensors_timer,
-                        [scheduler, broadlink_a1_sensors_interval, device, mqtt_prefix])
+                        [scheduler, broadlink_a1_sensors_interval, mqtt_prefix])
         # scheduler.run()
         tt = SchedulerThread(scheduler)
         tt.daemon = True
@@ -451,7 +477,7 @@ def configure_device(device, mqtt_prefix):
     if device.type == 'MP1' and broadlink_mp1_state_interval > 0:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(broadlink_mp1_state_interval, 1, broadlink_mp1_state_timer,
-                        [scheduler, broadlink_mp1_state_interval, device, mqtt_prefix])
+                        [scheduler, broadlink_mp1_state_interval, mqtt_prefix])
         # scheduler.run()
         tt = SchedulerThread(scheduler)
         tt.daemon = True
@@ -474,7 +500,7 @@ def configure_device(device, mqtt_prefix):
         if broadlink_dooya_position_interval > 0:
             scheduler = sched.scheduler(time.time, time.sleep)
             scheduler.enter(broadlink_dooya_position_interval, 1, broadlink_dooya_position_timer,
-                            [scheduler, broadlink_dooya_position_interval, device])
+                            [scheduler, broadlink_dooya_position_interval])
             # scheduler.run()
             tt = SchedulerThread(scheduler)
             tt.daemon = True
@@ -484,112 +510,115 @@ def configure_device(device, mqtt_prefix):
     if device.type == 'BG1' and broadlink_bg1_state_interval > 0:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(broadlink_bg1_state_interval, 1, broadlink_bg1_state_timer,
-                        [scheduler, broadlink_bg1_state_interval, device, mqtt_prefix])
+                        [scheduler, broadlink_bg1_state_interval, mqtt_prefix])
         # scheduler.run()
         tt = SchedulerThread(scheduler)
         tt.daemon = True
         tt.start()
 
-    return device
+
+def broadlink_rm_temperature_timer(scheduler, delay, mqtt_prefix):
+    scheduler.enter(delay, 1, broadlink_rm_temperature_timer, [scheduler, delay, mqtt_prefix])
+
+    for device in global_device.values():
+        try:
+            temperature = str(device.check_temperature())
+            topic = mqtt_prefix + "temperature"
+            logging.debug("Sending RM temperature " + temperature + " to topic " + topic)
+            mqttc.publish(topic, temperature, qos=qos, retain=retain)
+            if device.type == 'RM4':
+                humidity = str(device.check_humidity())
+                topic = mqtt_prefix + "humidity"
+                logging.debug("Sending RM humidity " + humidity + " to topic " + topic)
+                mqttc.publish(topic, humidity, qos=qos, retain=retain)
+        except:
+            logging.exception("Error")
 
 
-def broadlink_rm_temperature_timer(scheduler, delay, device, mqtt_prefix):
-    scheduler.enter(delay, 1, broadlink_rm_temperature_timer, [scheduler, delay, device, mqtt_prefix])
+def broadlink_sp_energy_timer(scheduler, delay, mqtt_prefix):
+    scheduler.enter(delay, 1, broadlink_sp_energy_timer, [scheduler, delay, mqtt_prefix])
 
-    try:
-        temperature = str(device.check_temperature())
-        topic = mqtt_prefix + "temperature"
-        logging.debug("Sending RM temperature " + temperature + " to topic " + topic)
-        mqttc.publish(topic, temperature, qos=qos, retain=retain)
-
-        if device.type == 'RM4':
-            humidity = str(device.check_humidity())
-            topic = mqtt_prefix + "humidity"
-            logging.debug("Sending RM humidity " + humidity + " to topic " + topic)
-            mqttc.publish(topic, humidity, qos=qos, retain=retain)
-    except:
-        logging.exception("Error")
+    for device in global_device.values():
+        try:
+            energy = str(device.get_energy())
+            topic = mqtt_prefix + "energy"
+            logging.debug("Sending SP energy " + energy + " to topic " + topic)
+            mqttc.publish(topic, energy, qos=qos, retain=retain)
+        except:
+            logging.exception("Error")
 
 
-def broadlink_sp_energy_timer(scheduler, delay, device, mqtt_prefix):
-    scheduler.enter(delay, 1, broadlink_sp_energy_timer, [scheduler, delay, device, mqtt_prefix])
+def broadlink_a1_sensors_timer(scheduler, delay, mqtt_prefix):
+    scheduler.enter(delay, 1, broadlink_a1_sensors_timer, [scheduler, delay, mqtt_prefix])
 
-    try:
-        energy = str(device.get_energy())
-        topic = mqtt_prefix + "energy"
-        logging.debug("Sending SP energy " + energy + " to topic " + topic)
-        mqttc.publish(topic, energy, qos=qos, retain=retain)
-    except:
-        logging.exception("Error")
-
-
-def broadlink_a1_sensors_timer(scheduler, delay, device, mqtt_prefix):
-    scheduler.enter(delay, 1, broadlink_a1_sensors_timer, [scheduler, delay, device, mqtt_prefix])
-
-    try:
-        text_values = cf.get('broadlink_a1_sensors_text_values', False)
-        is_json = cf.get('broadlink_a1_sensors_json', False)
-        sensors = device.check_sensors() if text_values else device.check_sensors_raw()
-        if is_json:
-            topic = mqtt_prefix + "sensors"
-            value = json.dumps(sensors)
-            logging.debug("Sending A1 sensors '%s' to topic '%s'" % (value, topic))
-            mqttc.publish(topic, value, qos=qos, retain=retain)
-        else:
-            for name in sensors:
-                topic = mqtt_prefix + "sensor/" + name
-                value = str(sensors[name])
-                logging.debug("Sending A1 %s '%s' to topic '%s'" % (name, value, topic))
+    for device in global_device.values():
+        try:
+            text_values = cf.get('broadlink_a1_sensors_text_values', False)
+            is_json = cf.get('broadlink_a1_sensors_json', False)
+            sensors = device.check_sensors() if text_values else device.check_sensors_raw()
+            if is_json:
+                topic = mqtt_prefix + "sensors"
+                value = json.dumps(sensors)
+                logging.debug("Sending A1 sensors '%s' to topic '%s'" % (value, topic))
                 mqttc.publish(topic, value, qos=qos, retain=retain)
-    except:
-        logging.exception("Error")
+            else:
+                for name in sensors:
+                    topic = mqtt_prefix + "sensor/" + name
+                    value = str(sensors[name])
+                    logging.debug("Sending A1 %s '%s' to topic '%s'" % (name, value, topic))
+                    mqttc.publish(topic, value, qos=qos, retain=retain)
+        except:
+            logging.exception("Error")
 
 
-def broadlink_mp1_state_timer(scheduler, delay, device, mqtt_prefix):
-    scheduler.enter(delay, 1, broadlink_mp1_state_timer, [scheduler, delay, device, mqtt_prefix])
+def broadlink_mp1_state_timer(scheduler, delay, mqtt_prefix):
+    scheduler.enter(delay, 1, broadlink_mp1_state_timer, [scheduler, delay, mqtt_prefix])
 
-    try:
-        is_json = cf.get('broadlink_mp1_state_json', False)
-        state = device.check_power()
-        if is_json:
-            topic = mqtt_prefix + "state"
-            value = json.dumps(state)
-            logging.debug("Sending MP1 state '%s' to topic '%s'" % (value, topic))
-            mqttc.publish(topic, value, qos=qos, retain=retain)
-        elif state is not None:
-            for name in state:
-                topic = mqtt_prefix + "state/" + name
-                value = str(state[name])
-                logging.debug("Sending MP1 %s '%s' to topic '%s'" % (name, value, topic))
+    for device in global_device.values():
+        try:
+            is_json = cf.get('broadlink_mp1_state_json', False)
+            state = device.check_power()
+            if is_json:
+                topic = mqtt_prefix + "state"
+                value = json.dumps(state)
+                logging.debug("Sending MP1 state '%s' to topic '%s'" % (value, topic))
                 mqttc.publish(topic, value, qos=qos, retain=retain)
-    except:
-        logging.exception("Error")
+            elif state is not None:
+                for name in state:
+                    topic = mqtt_prefix + "state/" + name
+                    value = str(state[name])
+                    logging.debug("Sending MP1 %s '%s' to topic '%s'" % (name, value, topic))
+                    mqttc.publish(topic, value, qos=qos, retain=retain)
+        except:
+            logging.exception("Error")
 
 
-def broadlink_dooya_position_timer(scheduler, delay, device):
-    scheduler.enter(delay, 1, broadlink_dooya_position_timer, [scheduler, delay, device])
-    device.publish(device.get_percentage())
+def broadlink_dooya_position_timer(scheduler, delay):
+    for device in global_device.values():
+        scheduler.enter(delay, 1, broadlink_dooya_position_timer, [scheduler, delay, device])
+        device.publish(device.get_percentage())
 
 
-def broadlink_bg1_state_timer(scheduler, delay, device, mqtt_prefix):
-    scheduler.enter(delay, 1, broadlink_bg1_state_timer, [scheduler, delay, device, mqtt_prefix])
+def broadlink_bg1_state_timer(scheduler, delay, mqtt_prefix):
+    scheduler.enter(delay, 1, broadlink_bg1_state_timer, [scheduler, delay, mqtt_prefix])
 
-    try:
-        is_json = cf.get('broadlink_bg1_state_json', False)
-        state = device.get_state()
-        if is_json:
-            topic = mqtt_prefix + "state"
-            value = json.dumps(state)
-            logging.debug("Sending BG1 state '%s' to topic '%s'" % (value, topic))
-            mqttc.publish(topic, value, qos=qos, retain=retain)
-        elif state is not None:
-            for name in state:
-                topic = mqtt_prefix + "state/" + name
-                value = str(state[name])
-                logging.debug("Sending BG1 %s '%s' to topic '%s'" % (name, value, topic))
+    for device in global_device.values():
+        try:
+            is_json = cf.get('broadlink_bg1_state_json', False)
+            state = device.get_state()
+            if is_json:
+                topic = mqtt_prefix + "state"
+                value = json.dumps(state)
+                logging.debug("Sending BG1 state '%s' to topic '%s'" % (value, topic))
                 mqttc.publish(topic, value, qos=qos, retain=retain)
-    except:
-        logging.exception("Error")
+            elif state is not None:
+                for name in state:
+                    topic = mqtt_prefix + "state/" + name
+                    value = str(state[name])
+                    logging.debug("Sending BG1 %s '%s' to topic '%s'" % (name, value, topic))
+                    mqttc.publish(topic, value, qos=qos, retain=retain)
+        except:
+            logging.exception("Error")
 
 
 class SchedulerThread(Thread):
@@ -605,16 +634,17 @@ class SchedulerThread(Thread):
 
 
 if __name__ == '__main__':
-    devices = get_device(cf)
+    startTimer()
 
     clientid = cf.get('mqtt_clientid', 'broadlink-%s' % os.getpid())
     # initialise MQTT broker connection
-    mqttc = paho.Client(clientid, clean_session=cf.get('mqtt_clean_session', False), userdata=devices)
+    mqttc = paho.Client(clientid, clean_session=cf.get('mqtt_clean_session', False))
 
     mqttc.on_message = on_message
     mqttc.on_connect = on_connect
     mqttc.on_disconnect = on_disconnect
 
+    start_scheduler()
     if cf.get('mqtt_will_payload', False):
         mqttc.will_set(cf.get('mqtt_will_topic', 'clients/broadlink'), payload=cf.get('mqtt_will_payload'), qos=0, retain=True)
 
