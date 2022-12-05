@@ -435,12 +435,19 @@ def configure_device(device, mqtt_prefix):
 
 
 def start_scheduler():
+    mqtt_multiple_prefix_format = cf.get('mqtt_multiple_subprefix_format', None)
     device = list(global_device.values())[0]
+    mqtt_subprefix = mqtt_multiple_prefix_format.format(
+                type=device.type,
+                host=device.host[0],
+                mac='_'.join(format(s, '02x') for s in device.mac),
+                mac_nic='_'.join(format(s, '02x') for s in device.mac[3::]))
+    mqtt_prefix = topic_prefix + mqtt_subprefix
     broadlink_rm_temperature_interval = cf.get('broadlink_rm_temperature_interval', 0)
     if (device.type == 'RM2' or device.type == 'RM4' or device.type == 'RM4PRO' or device.type == 'RM4MINI') and broadlink_rm_temperature_interval > 0:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(broadlink_rm_temperature_interval, 1, broadlink_rm_temperature_timer,
-                        [scheduler, broadlink_rm_temperature_interval, ""])
+                        [scheduler, broadlink_rm_temperature_interval,mqtt_prefix ])
         # scheduler.run()
         tt = SchedulerThread(scheduler)
         tt.daemon = True
@@ -450,7 +457,7 @@ def start_scheduler():
     if (device.type == 'SP2' or device.type == 'SP3S') and broadlink_sp_energy_interval > 0:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(broadlink_sp_energy_interval, 1, broadlink_sp_energy_timer,
-                        [scheduler, broadlink_sp_energy_interval, ""])
+                        [scheduler, broadlink_sp_energy_interval, mqtt_prefix])
         # scheduler.run()
         tt = SchedulerThread(scheduler)
         tt.daemon = True
@@ -460,7 +467,7 @@ def start_scheduler():
     if device.type == 'A1' and broadlink_a1_sensors_interval > 0:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(broadlink_a1_sensors_interval, 1, broadlink_a1_sensors_timer,
-                        [scheduler, broadlink_a1_sensors_interval, ""])
+                        [scheduler, broadlink_a1_sensors_interval, mqtt_prefix])
         # scheduler.run()
         tt = SchedulerThread(scheduler)
         tt.daemon = True
@@ -470,7 +477,7 @@ def start_scheduler():
     if device.type == 'MP1' and broadlink_mp1_state_interval > 0:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(broadlink_mp1_state_interval, 1, broadlink_mp1_state_timer,
-                        [scheduler, broadlink_mp1_state_interval, ""])
+                        [scheduler, broadlink_mp1_state_interval, mqtt_prefix])
         # scheduler.run()
         tt = SchedulerThread(scheduler)
         tt.daemon = True
@@ -503,7 +510,7 @@ def start_scheduler():
     if device.type == 'BG1' and broadlink_bg1_state_interval > 0:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(broadlink_bg1_state_interval, 1, broadlink_bg1_state_timer,
-                        [scheduler, broadlink_bg1_state_interval, ""])
+                        [scheduler, broadlink_bg1_state_interval, mqtt_prefix])
         # scheduler.run()
         tt = SchedulerThread(scheduler)
         tt.daemon = True
