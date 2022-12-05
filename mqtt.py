@@ -124,7 +124,6 @@ def on_message(client, device, msg):
     except Exception:
         logging.exception("Error")
 
-
 def exec_command_message(command, device, msg):
     action = msg.payload.decode('utf-8').lower()
     logging.debug("Received MQTT message " + msg.topic + " " + action)
@@ -377,23 +376,22 @@ def get_device(cf):
         lookup_timeout = cf.get('lookup_timeout', 20)
         devices = broadlink.discover(timeout=lookup_timeout) if local_address is None else \
             broadlink.discover(timeout=lookup_timeout, local_ip_address=local_address)
-
         if len(devices) == 0:
             logging.error('No Broadlink devices found')
             sys.exit(2)
         mqtt_multiple_prefix_format = cf.get('mqtt_multiple_subprefix_format', None)
         devices_dict = {}
         for device in devices:
-            # Devices's timeout its time to try send and receive confirmation messages to broadlink
-            device.timeout = 1
             mqtt_subprefix = mqtt_multiple_prefix_format.format(
                 type=device.type,
                 host=device.host[0],
                 mac='_'.join(format(s, '02x') for s in device.mac),
                 mac_nic='_'.join(format(s, '02x') for s in device.mac[3::]))
-            print("Connected with decice: ", device)
             device = configure_device(device, topic_prefix + mqtt_subprefix)
-            devices_dict[mqtt_subprefix] = device
+            if device != None:
+                devices_dict[mqtt_subprefix] = device
+            else:
+                logging.error('Error on authenticate device: ')
         return devices_dict
     elif device_type == 'test':
         return configure_device(TestDevice(cf), topic_prefix)
@@ -425,14 +423,15 @@ def get_device(cf):
 
 
 def configure_device(device, mqtt_prefix):
+    # Devices's timeout its time to try send and receive confirmation messages to broadlink
+    device.timeout = 1
     try:
         device.auth()
         logging.debug('Connected to \'%s\' Broadlink device at \'%s\' (MAC %s) and started listening to MQTT commands at \'%s#\' '
-                  % (device.type, device.host[0], ':'.join(format(s, '02x') for s in device.mac), mqtt_prefix))
+                      % (device.type, device.host[0], ':'.join(format(s, '02x') for s in device.mac), mqtt_prefix))
+        return device
     except:
-        print("Error on autenticate device, Plese confirm if device is connect")
-    return device
-
+        return
 
 def start_scheduler():
     device = list(global_device.values())[0]
@@ -476,28 +475,15 @@ def start_scheduler():
         tt.daemon = True
         tt.start()
 
-    if device.type == 'Dooya DT360E':
-        # noinspection PyUnusedLocal
-        def publish(dev, percentage):
-            try:
-                percentage = str(percentage)
-                topic = "" + "position"
-                logging.debug("Sending Dooya position " + percentage + " to topic " + topic)
-                mqttc.publish(topic, percentage, qos=qos, retain=retain)
-            except:
-                logging.exception("Error")
-
-        device.publish = types.MethodType(publish, device)
-
-        broadlink_dooya_position_interval = cf.get('broadlink_dooya_position_interval', 0)
-        if broadlink_dooya_position_interval > 0:
-            scheduler = sched.scheduler(time.time, time.sleep)
-            scheduler.enter(broadlink_dooya_position_interval, 1, broadlink_dooya_position_timer,
-                            [scheduler, broadlink_dooya_position_interval])
-            # scheduler.run()
-            tt = SchedulerThread(scheduler)
-            tt.daemon = True
-            tt.start()
+    broadlink_dooya_position_interval = cf.get('broadlink_dooya_position_interval', 0)
+    if device.type == 'Dooya DT360E' and broadlink_dooya_position_interval > 0:
+        scheduler = sched.scheduler(time.time, time.sleep)
+        scheduler.enter(broadlink_dooya_position_interval, 1, broadlink_dooya_position_timer,
+                        [scheduler, broadlink_dooya_position_interval])
+        # scheduler.run()
+        tt = SchedulerThread(scheduler)
+        tt.daemon = True
+        tt.start()
 
     broadlink_bg1_state_interval = cf.get('broadlink_bg1_state_interval', 0)
     if device.type == 'BG1' and broadlink_bg1_state_interval > 0:
@@ -615,8 +601,27 @@ def broadlink_mp1_state_timer(scheduler, delay):
 
 
 def broadlink_dooya_position_timer(scheduler, delay):
+    scheduler.enter(delay, 1, broadlink_dooya_position_timer, [scheduler, delay])
+
     for device in global_device.values():
-        scheduler.enter(delay, 1, broadlink_dooya_position_timer, [scheduler, delay, device])
+        mqtt_multiple_prefix_format = cf.get('mqtt_multiple_subprefix_format', None)
+        mqtt_subprefix = mqtt_multiple_prefix_format.format(
+                    type=device.type,
+                    host=device.host[0],
+                    mac='_'.join(format(s, '02x') for s in device.mac),
+                    mac_nic='_'.join(format(s, '02x') for s in device.mac[3::]))
+        mqtt_prefix = topic_prefix + mqtt_subprefix
+        # noinspection PyUnusedLocal
+        def publish(dev, percentage):
+            try:
+                percentage = str(percentage)
+                topic = mqtt_prefix + "position"
+                logging.debug("Sending Dooya position " + percentage + " to topic " + topic)
+                mqttc.publish(topic, percentage, qos=qos, retain=retain)
+            except:
+                logging.exception("Error")
+
+        device.publish = types.MethodType(publish, device)
         device.publish(device.get_percentage())
 
 
@@ -662,6 +667,7 @@ class SchedulerThread(Thread):
 
 
 if __name__ == '__main__':
+    broadlink.setup("TheoFi", "theobaldo", 3)
     startTimer()
 
     clientid = cf.get('mqtt_clientid', 'broadlink-%s' % os.getpid())
