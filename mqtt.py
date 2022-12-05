@@ -447,7 +447,7 @@ def start_scheduler():
     if (device.type == 'RM2' or device.type == 'RM4' or device.type == 'RM4PRO' or device.type == 'RM4MINI') and broadlink_rm_temperature_interval > 0:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(broadlink_rm_temperature_interval, 1, broadlink_rm_temperature_timer,
-                        [scheduler, broadlink_rm_temperature_interval,mqtt_prefix ])
+                        [scheduler, broadlink_rm_temperature_interval,mqtt_prefix])
         # scheduler.run()
         tt = SchedulerThread(scheduler)
         tt.daemon = True
@@ -488,7 +488,7 @@ def start_scheduler():
         def publish(dev, percentage):
             try:
                 percentage = str(percentage)
-                topic = "" + "position"
+                topic = mqtt_prefix + "position"
                 logging.debug("Sending Dooya position " + percentage + " to topic " + topic)
                 mqttc.publish(topic, percentage, qos=qos, retain=retain)
             except:
@@ -518,8 +518,8 @@ def start_scheduler():
 
 
 def broadlink_rm_temperature_timer(scheduler, delay, mqtt_prefix):
-
     scheduler.enter(delay, 1, broadlink_rm_temperature_timer, [scheduler, delay, mqtt_prefix])
+
     for device in global_device.values():
         try:
             temperature = str(device.check_temperature())
